@@ -1,10 +1,10 @@
-use anyhow::{bail, Context};
+use anyhow::{Context};
 use clap::{Parser, Subcommand};
 use flate2::read::ZlibDecoder;
 use std::{
     ffi::CStr,
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufRead, BufReader, Read},
 };
 
 #[derive(Parser, Debug)]
