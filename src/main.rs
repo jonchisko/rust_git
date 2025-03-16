@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::{Parser, Subcommand};
 use flate2::read::ZlibDecoder;
 use std::{
@@ -25,6 +25,10 @@ enum Command {
     },
 }
 
+enum Kind {
+    Blob,
+}
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
@@ -40,6 +44,11 @@ fn main() -> anyhow::Result<()> {
             pretty_print,
             object_hash,
         } => {
+            anyhow::ensure!(
+                pretty_print,
+                "mode must be given without -p, we don't support it yet"
+            );
+
             // TODO: support shortest unique object hashes
             let f = std::fs::File::open(format!(
                 ".git/objects/{}/{}",
@@ -59,15 +68,25 @@ fn main() -> anyhow::Result<()> {
             let header = header
                 .to_str()
                 .context(".git/objects file header isn't valid UTF-8")?;
-            let Some(size) = header.strip_prefix("blob ") else {
-                anyhow::bail!(".git/objects file header did not start with 'blob': '{header}'");
+
+            let Some((kind, size)) = header.split_once(' ') else {
+                anyhow::bail!(
+                    ".git/objects file header did not start with a known header: '{header}'"
+                );
             };
+
+            let kind = match kind {
+                "blob" => Kind::Blob,
+                _ => anyhow::bail!("we do not know yet how to handle this kind '{kind}'"),
+            };
+
             let size = size
                 .parse::<usize>()
                 .context(".git/objects file has invalid size: {size}")?;
 
             buf.clear();
-            buf.reserve_exact(size);
+            buf.resize(size, 0);
+
             z.read_exact(&mut buf[..])
                 .context(".git/objects file contents did not match size epxectation")?;
             let n = z
@@ -77,9 +96,14 @@ fn main() -> anyhow::Result<()> {
 
             let stdout = std::io::stdout();
             let mut stdout = stdout.lock();
-            stdout
-                .write_all(&buf)
-                .context("write object contents to stdout")?;
+
+            match kind {
+                Kind::Blob => {
+                    stdout
+                        .write_all(&buf)
+                        .context("write object contents to stdout")?;
+                }
+            }
         }
     }
 
