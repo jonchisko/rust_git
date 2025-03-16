@@ -84,28 +84,54 @@ fn main() -> anyhow::Result<()> {
                 .parse::<usize>()
                 .context(".git/objects file has invalid size: {size}")?;
 
-            buf.clear();
-            buf.resize(size, 0);
-
-            z.read_exact(&mut buf[..])
-                .context(".git/objects file contents did not match size epxectation")?;
-            let n = z
-                .read(&mut [0])
-                .context("validate EOF in .git/object file")?;
-            anyhow::ensure!(n == 0, ".git/object file had {n} trailing bytes");
-
-            let stdout = std::io::stdout();
-            let mut stdout = stdout.lock();
+            let mut z = LimitReader {
+                reader: z,
+                limit: size,
+            };
 
             match kind {
                 Kind::Blob => {
-                    stdout
-                        .write_all(&buf)
-                        .context("write object contents to stdout")?;
+                    let stdout = std::io::stdout();
+                    let mut stdout = stdout.lock();
+                    let n = std::io::copy(&mut z, &mut stdout)
+                        .context("write .git/objects file to stdout")?;
+
+                    anyhow::ensure!(
+                        n as usize == size,
+                        ".git/object file did not have expected size 
+                        (actual: {n}, expected: {size})."
+                    );
                 }
             }
         }
     }
 
     Ok(())
+}
+
+struct LimitReader<R> {
+    reader: R,
+    limit: usize,
+}
+
+impl<R> Read for LimitReader<R>
+where
+    R: Read,
+{
+    fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.len() > self.limit {
+            buf = &mut buf[..self.limit + 1];
+        }
+
+        let n = self.reader.read(buf)?;
+        if n > self.limit {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "too many bytes",
+            ));
+        }
+
+        self.limit -= n;
+        Ok(n)
+    }
 }
